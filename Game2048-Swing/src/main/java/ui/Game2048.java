@@ -17,8 +17,7 @@ public class Game2048 extends JFrame implements KeyListener {
     private static final int GAP = 10;
     private static final int FONT_SIZE = 36;
     private static final int SCORE_HEIGHT = 60;
-//    private static final String USERNAME = System.getProperty("user.name");
-    private String playerName = "";
+    private static final int HINT_HEIGHT  = 30;
 
     private int[][] board = new int[SIZE][SIZE];
     private int score = 0;
@@ -27,16 +26,19 @@ public class Game2048 extends JFrame implements KeyListener {
     private volatile boolean busy = false;
     private volatile boolean aiRunning = false;
     private Thread aiThread;
+    private String playerName = "";
+
+
 
     public Game2048() {
-        setTitle("2048 – Swing/Threads/HTTP");
+        setTitle("2048");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setResizable(false);
         add(panel);
         addKeyListener(this);
 
         int boardPixels = SIZE * TILE_SIZE + (SIZE + 1) * GAP;
-        setSize(boardPixels, boardPixels + SCORE_HEIGHT + GAP);
+        setSize(boardPixels, boardPixels + SCORE_HEIGHT + HINT_HEIGHT + 2*GAP);
         setLocationRelativeTo(null);
 
         resetGame();
@@ -86,57 +88,13 @@ public class Game2048 extends JFrame implements KeyListener {
         }
         return moved;
     }
-
-    private void rotateLeft() {
-        int[][] n = new int[SIZE][SIZE];
-        for (int r = 0; r < SIZE; r++)
-            for (int c = 0; c < SIZE; c++)
-                n[SIZE - c - 1][r] = board[r][c];
-        board = n;
-    }
-
-    private void rotateRight() {
-        int[][] n = new int[SIZE][SIZE];
-        for (int r = 0; r < SIZE; r++)
-            for (int c = 0; c < SIZE; c++)
-                n[c][SIZE - r - 1] = board[r][c];
-        board = n;
-    }
-
-    private void rotate180() {
-        for (int r = 0; r < SIZE / 2; r++) {
-            int[] t = board[r];
-            board[r] = board[SIZE - r - 1];
-            board[SIZE - r - 1] = t;
-        }
-        for (int r = 0; r < SIZE; r++)
-            for (int c = 0; c < SIZE / 2; c++) {
-                int t = board[r][c];
-                board[r][c] = board[r][SIZE - c - 1];
-                board[r][SIZE - c - 1] = t;
-            }
-    }
-
-    private boolean moveRight() {
-        rotate180();
-        boolean m = moveLeft();
-        rotate180();
-        return m;
-    }
-
-    private boolean moveUp() {
-        rotateLeft();
-        boolean m = moveLeft();
-        rotateRight();
-        return m;
-    }
-
-    private boolean moveDown() {
-        rotateRight();
-        boolean m = moveLeft();
-        rotateLeft();
-        return m;
-    }
+    private void rotateLeft()  { int[][] n = new int[SIZE][SIZE];
+        for (int r = 0; r < SIZE; r++) for (int c = 0; c < SIZE; c++) n[SIZE - c - 1][r] = board[r][c]; board = n; }
+    private void rotateRight() { rotateLeft(); rotateLeft(); rotateLeft(); }
+    private void rotate180()   { rotateLeft(); rotateLeft(); }
+    private boolean moveRight(){ rotate180(); boolean m=moveLeft(); rotate180(); return m; }
+    private boolean moveUp()   { rotateLeft(); boolean m=moveLeft(); rotateRight();return m; }
+    private boolean moveDown() { rotateRight();boolean m=moveLeft(); rotateLeft(); return m; }
 
     private boolean canMove() {
         for (int r = 0; r < SIZE; ++r)
@@ -156,22 +114,15 @@ public class Game2048 extends JFrame implements KeyListener {
             while (aiRunning && canMove()) {
                 int dir = solver.nextMove(board);
                 if (!busy) doMoveByDir(dir);
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException ignored) {
-                }
+                try { Thread.sleep(100); } catch (InterruptedException ignored) {}
             }
         }, "AIThread");
         aiThread.start();
     }
+    private void stopAI() { aiRunning = false; }
 
-    private void stopAI() {
-        aiRunning = false;
-    }
-
-    // ---------- key events ----------
-    @Override
-    public void keyPressed(KeyEvent e) {
+    /* ---------------- keyboard ---------------- */
+    @Override public void keyPressed(KeyEvent e) {
         int code = e.getKeyCode();
         switch (code) {
             case KeyEvent.VK_R:
@@ -179,111 +130,68 @@ public class Game2048 extends JFrame implements KeyListener {
                 resetGame();
                 break;
             case KeyEvent.VK_A:
-                if (aiRunning) stopAI();
-                else startAI();
+                if (aiRunning) stopAI(); else startAI();
                 break;
             default:
                 doMoveByDir(mapKey(code));
         }
     }
-
     private int mapKey(int code) {
         switch (code) {
-            case KeyEvent.VK_LEFT:
-                return 0;
-            case KeyEvent.VK_RIGHT:
-                return 1;
-            case KeyEvent.VK_UP:
-                return 2;
-            case KeyEvent.VK_DOWN:
-                return 3;
-            default:
-                return -1;
+            case KeyEvent.VK_LEFT:  return 0;
+            case KeyEvent.VK_RIGHT: return 1;
+            case KeyEvent.VK_UP:    return 2;
+            case KeyEvent.VK_DOWN:  return 3;
+            default:                return -1;
         }
     }
-
     private void doMoveByDir(int dir) {
         if (dir == -1 || busy) return;
         busy = true;
         new Thread(() -> {
             boolean moved = false;
             switch (dir) {
-                case 0:
-                    moved = moveLeft();
-                    break;
-                case 1:
-                    moved = moveRight();
-                    break;
-                case 2:
-                    moved = moveUp();
-                    break;
-                case 3:
-                    moved = moveDown();
-                    break;
-                default:
-                    break;
+                case 0: moved = moveLeft();  break;
+                case 1: moved = moveRight(); break;
+                case 2: moved = moveUp();    break;
+                case 3: moved = moveDown();  break;
             }
             if (moved) addRandomTile();
             SwingUtilities.invokeLater(() -> {
                 panel.repaint();
-                if (!canMove()) {
-                    stopAI();
-                    showGameOver();
-                }
+                if (!canMove()) { stopAI(); showGameOver(); }
                 busy = false;
             });
         }, "MoveThread").start();
     }
 
-//    private void showGameOver() {
-//        int opt = JOptionPane.showConfirmDialog(
-//                this,
-//                "Game over! Score: " + score + "\nUpload & show leaderboard?",
-//                "2048",
-//                JOptionPane.YES_NO_OPTION
-//        );
-//        if (opt == JOptionPane.YES_OPTION) new LeaderboardWorker(USERNAME, score).execute();
-//    }
-private void showGameOver() {
-    if (playerName.isEmpty()) playerName = System.getProperty("user.name");
-    playerName = JOptionPane.showInputDialog(
-            this,
-            "Enter your name:",
-            playerName
-    );
+    /* ---------------- Game Over + enter the name ---------------- */
+    private void showGameOver() {
+        if (playerName.isEmpty()) playerName = System.getProperty("user.name");
+        playerName = JOptionPane.showInputDialog(
+                this, "Enter your name:", playerName);
+        if (playerName == null || playerName.trim().isEmpty()) return;
 
-    if (playerName == null || playerName.trim().isEmpty()) return;
+        int opt = JOptionPane.showConfirmDialog(
+                this,
+                "Game over! Score: " + score +
+                        "\nUpload & show leaderboard as \"" + playerName + "\" ?",
+                "2048",
+                JOptionPane.YES_NO_OPTION
+        );
+        if (opt == JOptionPane.YES_OPTION)
+            new LeaderboardWorker(playerName.trim(), score).execute();
+    }
 
-    int opt = JOptionPane.showConfirmDialog(
-            this,
-            "Game over! Score: " + score +
-                    "\nUpload & show leaderboard as \"" + playerName + "\" ?",
-            "2048",
-            JOptionPane.YES_NO_OPTION
-    );
-    if (opt == JOptionPane.YES_OPTION)
-        new LeaderboardWorker(playerName.trim(), score).execute();
-}
-
-
-    // ---------- SwingWorker ----------
+    /* ---------------- SwingWorker ---------------- */
     private class LeaderboardWorker extends SwingWorker<List<LeaderboardEntry>, Void> {
-        private final String name;
-        private final int sc;
-
-        public LeaderboardWorker(String n, int s) {
-            name = n;
-            sc = s;
-        }
-
-        @Override
-        protected List<LeaderboardEntry> doInBackground() throws Exception {
+        private final String name; private final int sc;
+        LeaderboardWorker(String n, int s){ name=n; sc=s; }
+        @Override protected List<LeaderboardEntry> doInBackground() throws Exception {
             NetUtil.postScore(name, sc);
             return NetUtil.fetchTopScores();
         }
-
-        @Override
-        protected void done() {
+        @Override protected void done() {
             try {
                 List<LeaderboardEntry> list = get();
                 StringBuilder sb = new StringBuilder("===== Leaderboard =====\n");
@@ -296,9 +204,8 @@ private void showGameOver() {
                 resetGame();
             } catch (InterruptedException | ExecutionException ex) {
                 JOptionPane.showMessageDialog(Game2048.this,
-                        "Network Error：" + ex.getMessage(),
-                        "Error",
-                        JOptionPane.ERROR_MESSAGE);
+                        "Network Error: " + ex.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -308,29 +215,40 @@ private void showGameOver() {
 
     // ---------- drawing ----------
     private class BoardPanel extends JPanel {
-        @Override
-        protected void paintComponent(Graphics g) {
+        @Override protected void paintComponent(Graphics g) {
             super.paintComponent(g);
             Graphics2D g2 = (Graphics2D) g;
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
             int boardPixels = SIZE * TILE_SIZE + (SIZE + 1) * GAP;
+            int offsetY = SCORE_HEIGHT + HINT_HEIGHT;
 
+            /* background */
             g2.setColor(new Color(0xbbada0));
-            g2.fillRoundRect(0, SCORE_HEIGHT, boardPixels, boardPixels, 15, 15);
+            g2.fillRoundRect(0, offsetY, boardPixels, boardPixels, 15, 15);
 
+            /* scores */
             g2.setColor(new Color(0x776e65));
             g2.setFont(getFont().deriveFont(Font.BOLD, 24f));
-            String s = "Score: " + score;
+            String scoreStr = "Score: " + score;
             FontMetrics fm = g2.getFontMetrics();
-            int sx = (boardPixels - fm.stringWidth(s)) / 2;
+            int sx = (boardPixels - fm.stringWidth(scoreStr)) / 2;
             int sy = (SCORE_HEIGHT + fm.getAscent() - fm.getDescent()) / 2;
-            g2.drawString(s, sx, sy);
+            g2.drawString(scoreStr, sx, sy);
 
+            /* key instructions */
+            g2.setFont(getFont().deriveFont(Font.PLAIN, 14f));
+            String hint = "← ↑ → ↓ : Move    A : Auto/Manual    R : Restart";
+            FontMetrics hfm = g2.getFontMetrics();
+            int hx = (boardPixels - hfm.stringWidth(hint)) / 2;
+            int hy = SCORE_HEIGHT + hfm.getAscent() + 4;
+            g2.drawString(hint, hx, hy);
+
+            /* draw */
             for (int r = 0; r < SIZE; r++)
                 for (int c = 0; c < SIZE; c++) {
                     int x = GAP + c * (TILE_SIZE + GAP);
-                    int y = SCORE_HEIGHT + GAP + r * (TILE_SIZE + GAP);
+                    int y = offsetY + GAP + r * (TILE_SIZE + GAP);
                     drawTile(g2, board[r][c], x, y);
                 }
         }
@@ -348,42 +266,26 @@ private void showGameOver() {
                 g.drawString(s, tx, ty);
             }
         }
-
         private Color getBG(int v) {
             switch (v) {
-                case 0:
-                    return new Color(0xcdc1b4);
-                case 2:
-                    return new Color(0xeee4da);
-                case 4:
-                    return new Color(0xede0c8);
-                case 8:
-                    return new Color(0xf2b179);
-                case 16:
-                    return new Color(0xf59563);
-                case 32:
-                    return new Color(0xf67c5f);
-                case 64:
-                    return new Color(0xf65e3b);
-                case 128:
-                    return new Color(0xedcf72);
-                case 256:
-                    return new Color(0xedcc61);
-                case 512:
-                    return new Color(0xedc850);
-                case 1024:
-                    return new Color(0xedc53f);
-                case 2048:
-                    return new Color(0xedc22e);
-                default:
-                    return new Color(0x3c3a32);
+                case 0:    return new Color(0xcdc1b4);
+                case 2:    return new Color(0xeee4da);
+                case 4:    return new Color(0xede0c8);
+                case 8:    return new Color(0xf2b179);
+                case 16:   return new Color(0xf59563);
+                case 32:   return new Color(0xf67c5f);
+                case 64:   return new Color(0xf65e3b);
+                case 128:  return new Color(0xedcf72);
+                case 256:  return new Color(0xedcc61);
+                case 512:  return new Color(0xedc850);
+                case 1024: return new Color(0xedc53f);
+                case 2048: return new Color(0xedc22e);
+                default:   return new Color(0x3c3a32);
             }
         }
-
-        @Override
-        public Dimension getPreferredSize() {
+        @Override public Dimension getPreferredSize() {
             int boardPixels = SIZE * TILE_SIZE + (SIZE + 1) * GAP;
-            return new Dimension(boardPixels, boardPixels + SCORE_HEIGHT + GAP);
+            return new Dimension(boardPixels, boardPixels + SCORE_HEIGHT + HINT_HEIGHT + GAP);
         }
     }
 

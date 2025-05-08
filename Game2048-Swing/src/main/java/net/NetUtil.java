@@ -29,10 +29,12 @@ public class NetUtil {
     }
 
     public static List<LeaderboardEntry> fetchTopScores() throws IOException {
-        URL url = new URL(BASE + "/scores");
+        URL url = new URL(BASE + "/scores/json");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         try (Reader r = new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)) {
             return G.fromJson(r, new TypeToken<List<LeaderboardEntry>>(){}.getType());
         }
     }
+
+    public static String getBase() { return BASE; }
 }
