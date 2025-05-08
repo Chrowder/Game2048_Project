@@ -3,163 +3,193 @@ package solver;
 import java.util.*;
 
 /**
- * Expectimax AutoSolver for 2048
- *
- * 方向编号与 Game2048 一致：
- *   0 = 左, 1 = 右, 2 = 上, 3 = 下
+ * Iterative‑Deepening Expectimax with Transposition Table
+ * 方向编号：0 左, 1 右, 2 上, 3 下
  */
 public class AutoSolver {
 
-    private static final int SIZE = 4;
+    /* ========= 参数（可微调） ========= */
+    private static final int   BASE_DEPTH   = 4;      // 基础深度
+    private static final long  TIME_BUDGET  = 40_000; // 每步搜索时长上限 μs
+    private static final int   SIZE         = 4;
+    private static final Random RAND        = new Random();
 
-    /** 公开接口：给定棋盘返回最佳方向 */
+    /* ========= 公共接口 ========= */
     public int nextMove(int[][] board) {
+        long deadline = System.nanoTime() + TIME_BUDGET * 1000;
         int bestDir = 0;
-        double bestScore = Double.NEGATIVE_INFINITY;
+        double bestVal = Double.NEGATIVE_INFINITY;
 
-        // 尝试 4 个方向
-        for (int dir = 0; dir < 4; dir++) {
-            int[][] next = cloneBoard(board);
-            if (!move(next, dir)) continue;               // 无效移动
-            double v = expectimax(next, 1, false);
-            if (v > bestScore) {
-                bestScore = v;
-                bestDir = dir;
+        // 迭代加深
+        for (int depth = 2; depth <= 12; depth++) {
+            TT.clear();                       // 置换表清空（或可保留）
+            int[] order = {0, 3, 2, 1};       // 先验顺序：下→左→上→右
+            int localBest = -1;
+            double localVal = Double.NEGATIVE_INFINITY;
+
+            for (int dir : order) {
+                if (System.nanoTime() > deadline) break;  // 时间到了
+                int[][] next = cloneBoard(board);
+                if (!move(next, dir)) continue;
+                double v = expectimax(next, depth - 1, false, deadline);
+                if (v > localVal || (v == localVal && RAND.nextBoolean())) {
+                    localVal = v;
+                    localBest = dir;
+                }
+            }
+            if (System.nanoTime() > deadline) break;
+            if (localBest != -1) {
+                bestDir = localBest;
+                bestVal = localVal;
             }
         }
         return bestDir;
     }
 
-    /* ------------------ Expectimax 搜索 ------------------ */
+    /* ========= Expectimax + 置换表 ========= */
+    private static final Map<Long, Double> TT = new HashMap<>();
 
-    private static final int MAX_DEPTH = 4;               // 基础深度
-    private double expectimax(int[][] state, int depth, boolean isPlayerTurn) {
-        if (depth == 0 || !canMove(state)) {
-            return evaluate(state);
-        }
+    private double expectimax(int[][] board, int depth, boolean isPlayer, long deadline) {
+        if (depth == 0 || !canMove(board) || System.nanoTime() > deadline)
+            return evaluate(board);
 
-        if (isPlayerTurn) {                               // 玩家层：max
+        long hash = zobrist(board, isPlayer);
+        Double cached = TT.get(hash);
+        if (cached != null && depth <= 6) return cached;
+
+        double result;
+        if (isPlayer) {                                // Max 层
             double best = Double.NEGATIVE_INFINITY;
             for (int dir = 0; dir < 4; dir++) {
-                int[][] next = cloneBoard(state);
+                int[][] next = cloneBoard(board);
                 if (!move(next, dir)) continue;
-                best = Math.max(best, expectimax(next, depth - 1, false));
+                best = Math.max(best, expectimax(next, depth - 1, false, deadline));
             }
-            return best;
-        } else {                                          // 环境层：期望
-            List<int[]> empties = emptyTiles(state);
+            result = best;
+        } else {                                       // 环境层 – 期望
+            List<int[]> empties = emptyTiles(board);
             double sum = 0;
             for (int[] pos : empties) {
                 int r = pos[0], c = pos[1];
-                // 90% 放 2
-                int[][] s2 = cloneBoard(state);
-                s2[r][c] = 2;
-                sum += 0.9 * expectimax(s2, depth - 1, true);
-                // 10% 放 4
-                int[][] s4 = cloneBoard(state);
-                s4[r][c] = 4;
-                sum += 0.1 * expectimax(s4, depth - 1, true);
+                int[][] b2 = cloneBoard(board);
+                b2[r][c] = 2;
+                sum += 0.9 * expectimax(b2, depth - 1, true, deadline);
+                b2[r][c] = 4;
+                sum += 0.1 * expectimax(b2, depth - 1, true, deadline);
             }
-            return sum / empties.size();
+            result = sum / empties.size();
         }
+        if (depth >= 4) TT.put(hash, result);          // 缓存
+        return result;
     }
 
-    /* -------------------- 评估函数 -------------------- */
+    /* ========= 评估函数 ========= */
     private double evaluate(int[][] b) {
         int empty = 0;
-        double smooth = 0;
-        double monoRow = 0, monoCol = 0;
+        double mono = 0, smooth = 0, cluster = 0;
         int max = 0;
 
-        // 平滑度 & 空格 & 最大值
+        // 预计算 log2
+        double[][] logs = new double[SIZE][SIZE];
         for (int r = 0; r < SIZE; r++)
             for (int c = 0; c < SIZE; c++) {
                 int v = b[r][c];
                 if (v == 0) { empty++; continue; }
-                if (v > max) max = v;
+                logs[r][c] = Math.log(v) / Math.log(2);
+                max = Math.max(max, v);
+            }
 
-                // 相邻差距
+        // 平滑度 + 聚类惩罚
+        for (int r = 0; r < SIZE; r++)
+            for (int c = 0; c < SIZE; c++) {
+                if (b[r][c] == 0) continue;
                 if (c + 1 < SIZE && b[r][c + 1] != 0)
-                    smooth -= Math.abs(Math.log(v) / Math.log(2) - Math.log(b[r][c + 1]) / Math.log(2));
+                    smooth -= Math.abs(logs[r][c] - logs[r][c + 1]);
                 if (r + 1 < SIZE && b[r + 1][c] != 0)
-                    smooth -= Math.abs(Math.log(v) / Math.log(2) - Math.log(b[r + 1][c]) / Math.log(2));
+                    smooth -= Math.abs(logs[r][c] - logs[r + 1][c]);
+
+                // 聚类：差值累加
+                for (int dr = -1; dr <= 1; dr++)
+                    for (int dc = -1; dc <= 1; dc++) {
+                        int nr = r + dr, nc = c + dc;
+                        if (nr < 0 || nc < 0 || nr >= SIZE || nc >= SIZE || b[nr][nc] == 0) continue;
+                        cluster += Math.abs(logs[r][c] - logs[nr][nc]);
+                    }
             }
 
-        // 行单调
-        for (int r = 0; r < SIZE; r++) {
-            int current = 0, next = 1;
-            while (next < SIZE) {
-                while (next < SIZE && b[r][next] == 0) next++;
-                if (next >= SIZE) next--;
-                int currVal = b[r][current] != 0 ? (int)Math.log(b[r][current]) : 0;
-                int nextVal = b[r][next]  != 0 ? (int)Math.log(b[r][next])  : 0;
-                if (currVal > nextVal) monoRow += nextVal - currVal;
-                current = next;
-                next++;
+        // 单调性（行 + 列）
+        mono += monotonicity(b, true) + monotonicity(b, false);
+
+        // 最大块在角
+        double maxCorner = (b[0][0]==max||b[0][SIZE-1]==max||b[SIZE-1][0]==max||b[SIZE-1][SIZE-1]==max)?1:0;
+
+        /* 权重 */
+        return  3.5 * empty +
+                1.5 * smooth +
+                1.0 * mono   +
+                -0.2 * cluster +
+                120.0 * maxCorner;
+    }
+    private double monotonicity(int[][] b, boolean row) {
+        double total = 0;
+        for (int i = 0; i < SIZE; i++) {
+            double inc = 0, dec = 0, prev = 0;
+            for (int j = 0; j < SIZE; j++) {
+                int v = row ? b[i][j] : b[j][i];
+                double cur = v == 0 ? 0 : Math.log(v) / Math.log(2);
+                if (cur > prev) inc += cur - prev; else dec += prev - cur;
+                prev = cur;
             }
+            total += Math.min(inc, dec);
         }
-        // 列单调
-        for (int c = 0; c < SIZE; c++) {
-            int current = 0, next = 1;
-            while (next < SIZE) {
-                while (next < SIZE && b[next][c] == 0) next++;
-                if (next >= SIZE) next--;
-                int currVal = b[current][c] != 0 ? (int)Math.log(b[current][c]) : 0;
-                int nextVal = b[next][c]   != 0 ? (int)Math.log(b[next][c])   : 0;
-                if (currVal > nextVal) monoCol += nextVal - currVal;
-                current = next;
-                next++;
-            }
-        }
-
-        // 最大块在角落奖励
-        double maxCorner = (b[0][0]==max || b[0][SIZE-1]==max || b[SIZE-1][0]==max || b[SIZE-1][SIZE-1]==max) ? 1 : 0;
-
-        // 权重可调
-        return  2.7 * empty +
-                1.0 * smooth +
-                1.0 * monoRow +
-                1.0 * monoCol +
-                100.0 * maxCorner;
+        return -total;
     }
 
-    /* ------------------ 工具函数 ------------------ */
+    /* ========= Zobrist 哈希 ========= */
+    private static final long[][][] Z = new long[SIZE][SIZE][16];
+    static {
+        for (int r = 0; r < SIZE; r++)
+            for (int c = 0; c < SIZE; c++)
+                for (int k = 0; k < 16; k++)
+                    Z[r][c][k] = RAND.nextLong();
+    }
+    private long zobrist(int[][] b, boolean playerTurn) {
+        long h = playerTurn ? 0L : 1L;
+        for (int r = 0; r < SIZE; r++)
+            for (int c = 0; c < SIZE; c++) {
+                int v = b[r][c];
+                if (v == 0) continue;
+                int log = Integer.numberOfTrailingZeros(v); // 2^n → n
+                h ^= Z[r][c][log & 15];
+            }
+        return h;
+    }
 
-    private boolean canMove(int[][] s) {
-        for (int dir = 0; dir < 4; dir++) {
-            int[][] copy = cloneBoard(s);
-            if (move(copy, dir)) return true;
+    /* ========= 工具函数（clone、move 等与旧版一致） ========= */
+    private int[][] cloneBoard(int[][] src){
+        int[][] dst = new int[SIZE][SIZE];
+        for(int i=0;i<SIZE;i++) System.arraycopy(src[i],0,dst[i],0,SIZE);
+        return dst;
+    }
+    private boolean canMove(int[][] b){
+        for(int d=0;d<4;d++){int[][] c=cloneBoard(b);if(move(c,d))return true;}return false;
+    }
+    private List<int[]> emptyTiles(int[][] b){
+        List<int[]> list=new ArrayList<>();
+        for(int r=0;r<SIZE;r++)for(int c=0;c<SIZE;c++)if(b[r][c]==0)list.add(new int[]{r,c});
+        return list;
+    }
+    private boolean move(int[][] board,int dir){
+        switch(dir){
+            case 0: return moveLeft(board);
+            case 1: return moveRight(board);
+            case 2: return moveUp(board);
+            case 3: return moveDown(board);
         }
         return false;
     }
-
-    private List<int[]> emptyTiles(int[][] s) {
-        List<int[]> list = new ArrayList<>();
-        for (int r = 0; r < SIZE; r++)
-            for (int c = 0; c < SIZE; c++)
-                if (s[r][c] == 0) list.add(new int[]{r, c});
-        return list;
-    }
-
-    private int[][] cloneBoard(int[][] src) {
-        int[][] dst = new int[SIZE][SIZE];
-        for (int i = 0; i < SIZE; i++) System.arraycopy(src[i], 0, dst[i], 0, SIZE);
-        return dst;
-    }
-
-    /* ---------- 与 Game2048 完全一致的移动实现 ---------- */
-
-    private boolean move(int[][] board, int dir) {
-        switch (dir) {
-            case 0:  return moveLeft(board);
-            case 1:  return moveRight(board);
-            case 2:  return moveUp(board);
-            case 3:  return moveDown(board);
-            default: return false;
-        }
-    }
-
-    private boolean moveLeft(int[][] board) {
+    /* == 以下 moveLeft/rotate 与之前版本相同，略 == */
+    private boolean moveLeft(int[][] board){ /* 同旧版 */
         boolean moved = false;
         for (int r = 0; r < SIZE; ++r) {
             int[] newRow = new int[SIZE];
@@ -168,7 +198,7 @@ public class AutoSolver {
                 int val = board[r][c];
                 if (val == 0) continue;
                 if (val == last) {
-                    newRow[pos - 1] *= 2;
+                    newRow[pos - 1] <<= 1;
                     last = 0;
                     moved = true;
                 } else {
@@ -182,19 +212,11 @@ public class AutoSolver {
         }
         return moved;
     }
-
-    private void rotateLeft(int[][] b) {
-        int[][] n = new int[SIZE][SIZE];
-        for (int r = 0; r < SIZE; r++)
-            for (int c = 0; c < SIZE; c++)
-                n[SIZE - c - 1][r] = b[r][c];
-        for (int r = 0; r < SIZE; r++)
-            System.arraycopy(n[r], 0, b[r], 0, SIZE);
-    }
-    private void rotateRight(int[][] b) { rotateLeft(b); rotateLeft(b); rotateLeft(b); }
-    private void rotate180(int[][] b)   { rotateLeft(b); rotateLeft(b); }
-
-    private boolean moveRight(int[][] b){ rotate180(b); boolean m=moveLeft(b); rotate180(b); return m; }
-    private boolean moveUp(int[][] b)   { rotateLeft(b); boolean m=moveLeft(b); rotateRight(b);return m; }
-    private boolean moveDown(int[][] b) { rotateRight(b);boolean m=moveLeft(b); rotateLeft(b); return m; }
+    private void rotateLeft(int[][] b){int[][] n=new int[SIZE][SIZE];
+        for(int r=0;r<SIZE;r++)for(int c=0;c<SIZE;c++)n[SIZE-c-1][r]=b[r][c];for(int r=0;r<SIZE;r++)System.arraycopy(n[r],0,b[r],0,SIZE);}
+    private void rotateRight(int[][] b){rotateLeft(b);rotateLeft(b);rotateLeft(b);}
+    private void rotate180(int[][] b){rotateLeft(b);rotateLeft(b);}
+    private boolean moveRight(int[][] b){rotate180(b);boolean m=moveLeft(b);rotate180(b);return m;}
+    private boolean moveUp(int[][] b){rotateLeft(b);boolean m=moveLeft(b);rotateRight(b);return m;}
+    private boolean moveDown(int[][] b){rotateRight(b);boolean m=moveLeft(b);rotateLeft(b);return m;}
 }

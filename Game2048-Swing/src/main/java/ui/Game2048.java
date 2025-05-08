@@ -7,6 +7,7 @@ import solver.AutoSolver;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.net.URI;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -184,7 +185,7 @@ public class Game2048 extends JFrame implements KeyListener {
     }
 
     /* ---------------- SwingWorker ---------------- */
-    private class LeaderboardWorker extends SwingWorker<List<LeaderboardEntry>, Void> {
+    private class LeaderboardWorker extends SwingWorker<List<LeaderboardEntry>,Void>{
         private final String name; private final int sc;
         LeaderboardWorker(String n, int s){ name=n; sc=s; }
         @Override protected List<LeaderboardEntry> doInBackground() throws Exception {
@@ -199,8 +200,24 @@ public class Game2048 extends JFrame implements KeyListener {
                 for (LeaderboardEntry e : list)
                     sb.append(rank++).append(". ").append(e.getName())
                             .append(" — ").append(e.getScore()).append("\n");
-                JOptionPane.showMessageDialog(Game2048.this, sb.toString(),
-                        "Leaderboard", JOptionPane.INFORMATION_MESSAGE);
+
+
+                Object[] options = {"Open Web Leaderboard", "OK"};
+                int choice = JOptionPane.showOptionDialog(
+                        Game2048.this, sb.toString(), "Leaderboard",
+                        JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE,
+                        null, options, options[1]);
+
+                if (choice == 0) {
+                    try {
+                        String url = NetUtil.getBase() + "/scores";
+                        Desktop.getDesktop().browse(new URI(url));
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(Game2048.this,
+                                "Cannot open browser: " + ex.getMessage(),
+                                "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
                 resetGame();
             } catch (InterruptedException | ExecutionException ex) {
                 JOptionPane.showMessageDialog(Game2048.this,
