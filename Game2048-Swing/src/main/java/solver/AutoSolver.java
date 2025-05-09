@@ -8,27 +8,27 @@ import java.util.*;
  */
 public class AutoSolver {
 
-    /* ========= 参数（可微调） ========= */
-    private static final int   BASE_DEPTH   = 4;      // 基础深度
-    private static final long  TIME_BUDGET  = 40_000; // 每步搜索时长上限 μs
+
+    private static final int   BASE_DEPTH   = 4;
+    private static final long  TIME_BUDGET  = 40_000;
     private static final int   SIZE         = 4;
     private static final Random RAND        = new Random();
 
-    /* ========= 公共接口 ========= */
+
     public int nextMove(int[][] board) {
         long deadline = System.nanoTime() + TIME_BUDGET * 1000;
         int bestDir = 0;
         double bestVal = Double.NEGATIVE_INFINITY;
 
-        // 迭代加深
+
         for (int depth = 2; depth <= 12; depth++) {
-            TT.clear();                       // 置换表清空（或可保留）
-            int[] order = {0, 3, 2, 1};       // 先验顺序：下→左→上→右
+            TT.clear();
+            int[] order = {0, 3, 2, 1};
             int localBest = -1;
             double localVal = Double.NEGATIVE_INFINITY;
 
             for (int dir : order) {
-                if (System.nanoTime() > deadline) break;  // 时间到了
+                if (System.nanoTime() > deadline) break;
                 int[][] next = cloneBoard(board);
                 if (!move(next, dir)) continue;
                 double v = expectimax(next, depth - 1, false, deadline);
@@ -46,7 +46,7 @@ public class AutoSolver {
         return bestDir;
     }
 
-    /* ========= Expectimax + 置换表 ========= */
+
     private static final Map<Long, Double> TT = new HashMap<>();
 
     private double expectimax(int[][] board, int depth, boolean isPlayer, long deadline) {
@@ -58,7 +58,7 @@ public class AutoSolver {
         if (cached != null && depth <= 6) return cached;
 
         double result;
-        if (isPlayer) {                                // Max 层
+        if (isPlayer) {
             double best = Double.NEGATIVE_INFINITY;
             for (int dir = 0; dir < 4; dir++) {
                 int[][] next = cloneBoard(board);
@@ -66,7 +66,7 @@ public class AutoSolver {
                 best = Math.max(best, expectimax(next, depth - 1, false, deadline));
             }
             result = best;
-        } else {                                       // 环境层 – 期望
+        } else {
             List<int[]> empties = emptyTiles(board);
             double sum = 0;
             for (int[] pos : empties) {
@@ -79,17 +79,17 @@ public class AutoSolver {
             }
             result = sum / empties.size();
         }
-        if (depth >= 4) TT.put(hash, result);          // 缓存
+        if (depth >= 4) TT.put(hash, result);
         return result;
     }
 
-    /* ========= 评估函数 ========= */
+
     private double evaluate(int[][] b) {
         int empty = 0;
         double mono = 0, smooth = 0, cluster = 0;
         int max = 0;
 
-        // 预计算 log2
+
         double[][] logs = new double[SIZE][SIZE];
         for (int r = 0; r < SIZE; r++)
             for (int c = 0; c < SIZE; c++) {
@@ -99,7 +99,7 @@ public class AutoSolver {
                 max = Math.max(max, v);
             }
 
-        // 平滑度 + 聚类惩罚
+
         for (int r = 0; r < SIZE; r++)
             for (int c = 0; c < SIZE; c++) {
                 if (b[r][c] == 0) continue;
@@ -108,7 +108,7 @@ public class AutoSolver {
                 if (r + 1 < SIZE && b[r + 1][c] != 0)
                     smooth -= Math.abs(logs[r][c] - logs[r + 1][c]);
 
-                // 聚类：差值累加
+
                 for (int dr = -1; dr <= 1; dr++)
                     for (int dc = -1; dc <= 1; dc++) {
                         int nr = r + dr, nc = c + dc;
@@ -117,13 +117,13 @@ public class AutoSolver {
                     }
             }
 
-        // 单调性（行 + 列）
+
         mono += monotonicity(b, true) + monotonicity(b, false);
 
-        // 最大块在角
+
         double maxCorner = (b[0][0]==max||b[0][SIZE-1]==max||b[SIZE-1][0]==max||b[SIZE-1][SIZE-1]==max)?1:0;
 
-        /* 权重 */
+
         return  3.5 * empty +
                 1.5 * smooth +
                 1.0 * mono   +
@@ -145,7 +145,7 @@ public class AutoSolver {
         return -total;
     }
 
-    /* ========= Zobrist 哈希 ========= */
+
     private static final long[][][] Z = new long[SIZE][SIZE][16];
     static {
         for (int r = 0; r < SIZE; r++)
@@ -165,7 +165,7 @@ public class AutoSolver {
         return h;
     }
 
-    /* ========= 工具函数（clone、move 等与旧版一致） ========= */
+
     private int[][] cloneBoard(int[][] src){
         int[][] dst = new int[SIZE][SIZE];
         for(int i=0;i<SIZE;i++) System.arraycopy(src[i],0,dst[i],0,SIZE);
@@ -188,8 +188,9 @@ public class AutoSolver {
         }
         return false;
     }
-    /* == 以下 moveLeft/rotate 与之前版本相同，略 == */
-    private boolean moveLeft(int[][] board){ /* 同旧版 */
+
+
+    private boolean moveLeft(int[][] board){
         boolean moved = false;
         for (int r = 0; r < SIZE; ++r) {
             int[] newRow = new int[SIZE];

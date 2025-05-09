@@ -10,7 +10,7 @@ import repository.ScoreRepository;
 
 import java.util.List;
 
-@Controller                   // **不是** RestController
+@Controller
 @CrossOrigin
 public class LeaderboardPageController {
 
